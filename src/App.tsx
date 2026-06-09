@@ -1,204 +1,132 @@
-import { useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import "./App.css";
 import Message from "./components/Message";
 import SendPhoto from "./components/sendPhoto";
-
 import type { ChatMessage, Sender } from "./types";
 import { STORAGE_KEY, backgroundPresets, MAX_IMAGE_SIZE_BYTES, seedMessages } from "./components/constants";
 import { createReply, formatTime, makeId } from "./components/chatHelper";
 
+// Make sure the user only picks a real image/GIF that fits the app limits.
+const validateFile = (file?: File): string | null => {
+  if (!file) return "No file selected.";
+  if (!file.type.startsWith("image/")) return "Please choose an image or GIF.";
+  if (file.size > MAX_IMAGE_SIZE_BYTES) return "File must be 2 MB or smaller.";
+  return null;
+};
+
 const App = () => {
-  // Load saved chat history from localStorage when the app starts.
+  // Theme colors for each sender so every bubble can keep its own look.
+  const [colors, setColors] = useState({ You: "#4338ca", Alex: "#111827" });
+
+  // Chat history is stored in localStorage so the conversation survives refreshes.
+
   const [messages, setMessages] = useState<ChatMessage[]>(() => {
     try {
-      const stored = window.localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored) as ChatMessage[];
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed.map((message) => ({
-            ...message,
-            bubbleColor:
-              message.bubbleColor ??
-              (message.sender === "You" ? "#4338ca" : "#111827"),
-          }));
-        }
-      }
-    } catch {
-      // Fall back to the starter chat when storage cannot be read.
-    }
-
-    return seedMessages.map((message) => ({
-      ...message,
-      bubbleColor: message.sender === "You" ? "#4338ca" : "#111827",
-    }));
+      const parsed = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || "[]");
+      if (parsed.length) return parsed.map((m: ChatMessage) => ({ ...m, bubbleColor: m.bubbleColor || colors[m.sender] }));
+    } catch {}
+    return seedMessages.map((m) => ({ ...m, bubbleColor: colors[m.sender] }));
   });
 
-  // The current text being typed and which person is sending it.
+  // Composer and active sender state for the message box.
   const [draft, setDraft] = useState("");
   const [activeUser, setActiveUser] = useState<Sender>("You");
 
-  // Background and theme controls for the chat surface.
-  const [backgroundMode, setBackgroundMode] = useState<"preset" | "image">("preset");
-  const [selectedPreset, setSelectedPreset] = useState<string>(backgroundPresets[0].value);
-  const [backgroundImageUrl, setBackgroundImageUrl] = useState<string | null>(null);
-  const [backgroundMessage, setBackgroundMessage] = useState("");
-  const [pendingAttachment, setPendingAttachment] = useState<{ url: string; name: string } | null>(null);
-  const [yourBubbleColor, setYourBubbleColor] = useState("#4338ca");
-  const [alexBubbleColor, setAlexBubbleColor] = useState("#111827");
+  // Backdrop settings are applied to the message panel only, not the whole page.
+  const [bgPreset, setBgPreset] = useState<string>(backgroundPresets[0].value);
+  const [bgImage, setBgImage] = useState<string | null>(null);
+  const [bgMsg, setBgMsg] = useState("");
+  const [attachment, setAttachment] = useState<{ url: string; name: string } | null>(null);
 
-  // Refs used to scroll to the latest message and open the image picker.
   const endOfMessagesRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Save the current conversation and keep the latest message visible.
+  // Save the conversation whenever the message list changes.
   useEffect(() => {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(messages));
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(messages));
+    } catch (error) {
+      console.error("Storage quota exceeded. Clear history to save more images.");
+      setBgMsg("Warning: Local storage full. Messages with images may not save.");
+    }
     endOfMessagesRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages]);
 
-  // Clean up any uploaded image preview URL when the background changes.
   useEffect(() => {
-    return () => {
-      if (backgroundImageUrl) {
-        URL.revokeObjectURL(backgroundImageUrl);
-      }
-    };
-  }, [backgroundImageUrl]);
+    return () => { if (bgImage) URL.revokeObjectURL(bgImage); };
+  }, [bgImage]);
 
-  // Switch the app background back to one of the preset gradients.
-  const applyPresetBackground = (value: string) => {
-    setSelectedPreset(value);
-    setBackgroundMode("preset");
-    setBackgroundMessage("");
+  // Load a custom image for the chat panel backdrop.
+  const handleImageUpload = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    const error = validateFile(file);
+    if (error) return setBgMsg(error), (e.target.value = "");
+
+    if (bgImage) URL.revokeObjectURL(bgImage);
+    setBgImage(URL.createObjectURL(file!));
+    setBgMsg("Custom image background applied.");
+    e.target.value = "";
   };
 
-  // Accept an image file, validate it, and set it as the chat background.
-  const handleImageUpload = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-
-    if (!file) return;
-
-    if (!file.type.startsWith("image/")) {
-      setBackgroundMessage("Please choose an image file.");
-      event.target.value = "";
-      return;
-    }
-
-    if (file.size > MAX_IMAGE_SIZE_BYTES) {
-      setBackgroundMessage("Images must be 2 MB or smaller for a quick preview.");
-      event.target.value = "";
-      return;
-    }
-
-    if (backgroundImageUrl) {
-      URL.revokeObjectURL(backgroundImageUrl);
-    }
-
-    const previewUrl = URL.createObjectURL(file);
-    setBackgroundImageUrl(previewUrl);
-    setBackgroundMode("image");
-    setBackgroundMessage("Custom image background applied.");
-    event.target.value = "";
-  };
-
-  // Accept a GIF or image attachment for the chat message.
   const handleMediaSelect = (file: File) => {
-    if (!file.type.startsWith("image/")) {
-      setBackgroundMessage("Please choose a GIF or image file.");
-      return;
-    }
-
-    if (file.size > MAX_IMAGE_SIZE_BYTES) {
-      setBackgroundMessage("Image and GIF uploads must be 2 MB or smaller.");
-      return;
-    }
+    const error = validateFile(file);
+    if (error) return setBgMsg(error);
 
     const reader = new FileReader();
-
     reader.onload = () => {
       if (typeof reader.result === "string") {
-        setPendingAttachment({ url: reader.result, name: file.name });
-        setBackgroundMessage(`Ready to send ${file.type === "image/gif" ? "GIF" : "image"}: ${file.name}`);
+        setAttachment({ url: reader.result, name: file.name });
+        setBgMsg(`Ready to send ${file.type === "image/gif" ? "GIF" : "image"}: ${file.name}`);
       }
     };
-
     reader.readAsDataURL(file);
   };
 
-  // Remove the custom image and fall back to the selected color theme.
+  // Remove the uploaded image and fall back to the preset theme in the chat panel.
   const clearImageBackground = () => {
-    if (backgroundImageUrl) {
-      URL.revokeObjectURL(backgroundImageUrl);
-    }
-
-    setBackgroundImageUrl(null);
-    setBackgroundMode("preset");
-    setBackgroundMessage("Image background removed. You can switch back to a color preset.");
+    if (bgImage) URL.revokeObjectURL(bgImage);
+    setBgImage(null);
+    setBgMsg("Image background removed. Back to preset.");
   };
 
-  // Build the background style based on whether the user is using a preset or an image.
-  const backgroundStyle =
-    backgroundMode === "image" && backgroundImageUrl
-      ? {
-          backgroundImage: `linear-gradient(rgba(8, 15, 25, 0.72), rgba(8, 15, 25, 0.82)), url(${backgroundImageUrl})`,
-          backgroundPosition: "center",
-          backgroundSize: "cover",
-          backgroundRepeat: "no-repeat",
-          backgroundColor: "#020617",
-        }
-      : {
-          background: selectedPreset,
-          backgroundColor: selectedPreset,
-        };
-
-  // Add the user's message, then generate a reply from Alex after a short delay.
+  // Send the user's text or attached image/GIF and create a short Alex reply.
   const sendMessage = () => {
     const trimmed = draft.trim();
-
-    if (!trimmed && !pendingAttachment) {
-      return;
-    }
+    if (!trimmed && !attachment) return;
 
     const outgoing: ChatMessage = {
-      id: makeId(),
-      sender: activeUser,
-      text: trimmed || (pendingAttachment ? "Sent an image/GIF" : ""),
-      timestamp: formatTime(new Date()),
-      imageUrl: pendingAttachment?.url,
-      bubbleColor: activeUser === "You" ? yourBubbleColor : alexBubbleColor,
+      id: makeId(), sender: activeUser, text: trimmed || "Sent an image/GIF",
+      timestamp: formatTime(new Date()), imageUrl: attachment?.url, bubbleColor: colors[activeUser],
     };
 
     setMessages((prev) => [...prev, outgoing]);
     setDraft("");
-    setPendingAttachment(null);
+    setAttachment(null);
 
-    const replyText = trimmed || (pendingAttachment ? "shared an image or GIF" : "");
-    const isYou = activeUser === "You";
-
+    const replySender = activeUser === "You" ? "Alex" : "You";
     window.setTimeout(() => {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: makeId(),
-          sender: isYou ? "Alex" : "You",
-          text: createReply(replyText),
-          timestamp: formatTime(new Date()),
-          bubbleColor: (isYou ? "Alex" : "You") === "You" ? yourBubbleColor : alexBubbleColor,
-        },
-      ]);
+      setMessages((prev) => [...prev, {
+        id: makeId(), sender: replySender, text: createReply(trimmed || "shared an image"),
+        timestamp: formatTime(new Date()), bubbleColor: colors[replySender],
+      }]);
     }, 700);
   };
 
-  // Let Enter send the message without needing to click the button.
-  const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === "Enter") {
-      event.preventDefault();
-      sendMessage();
-    }
-  };
+  // Use the selected image or preset only inside the conversation panel, not on the whole page shell.
+  const messagePanelStyle = bgImage
+    ? {
+        backgroundImage: `linear-gradient(rgba(8, 15, 25, 0.68), rgba(8, 15, 25, 0.88)), url(${bgImage})`,
+        backgroundPosition: "center",
+        backgroundSize: "cover",
+        backgroundColor: "#020617",
+      }
+    : {
+        background: bgPreset,
+        backgroundColor: bgPreset,
+      };
 
   return (
-    <main className="app-shell" style={backgroundStyle}>
+    <main className="app-shell">
       <section className="chat-card">
         <header className="chat-header">
           <div>
@@ -212,14 +140,11 @@ const App = () => {
         <div className="chat-topbar">
           <label className="sender-picker">
             <span>Active profile</span>
-            <select value={activeUser} onChange={(event) => setActiveUser(event.target.value as Sender)}>
+            <select value={activeUser} onChange={(e) => setActiveUser(e.target.value as Sender)}>
               <option value="You">You</option>
               <option value="Alex">Alex</option>
             </select>
           </label>
-          <button type="button" className="ghost-button" onClick={() => fileInputRef.current?.click()}>
-            Upload hologram
-          </button>
         </div>
 
         <section className="background-controls" aria-label="Background options">
@@ -230,83 +155,54 @@ const App = () => {
 
           <div className="preset-row">
             {backgroundPresets.map((preset) => (
-              <button
-                key={preset.name}
-                type="button"
-                className={`preset-chip ${selectedPreset === preset.value && backgroundMode === "preset" ? "active" : ""}`}
-                onClick={() => applyPresetBackground(preset.value)}
-                style={{ background: preset.value }}
-              >
+              <button key={preset.name} type="button" className={`preset-chip ${bgPreset === preset.value && !bgImage ? "active" : ""}`} onClick={() => { setBgPreset(preset.value); setBgImage(null); setBgMsg(""); }} style={{ background: preset.value }}>
                 {preset.name}
               </button>
             ))}
           </div>
 
           <div className="background-actions">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              className="hidden-file-input"
-              onChange={handleImageUpload}
-            />
-            <button type="button" className="ghost-button" onClick={() => fileInputRef.current?.click()}>
-              Load image backdrop
-            </button>
-            <button type="button" className="ghost-button secondary" onClick={clearImageBackground}>
-              Reset to neon theme
-            </button>
+            <input ref={fileInputRef} type="file" accept="image/*" className="hidden-file-input" onChange={handleImageUpload} />
+            <button type="button" className="ghost-button" onClick={() => fileInputRef.current?.click()}>Load image backdrop</button>
+            <button type="button" className="ghost-button secondary" onClick={clearImageBackground}>Reset to neon theme</button>
           </div>
 
           <div className="color-row">
             <label className="color-picker">
               <span>Your bubble color</span>
-              <input type="color" value={yourBubbleColor} onChange={(event) => setYourBubbleColor(event.target.value)} />
+              <input type="color" value={colors.You} onChange={(e) => setColors({ ...colors, You: e.target.value })} />
             </label>
             <label className="color-picker">
               <span>Alex bubble color</span>
-              <input type="color" value={alexBubbleColor} onChange={(event) => setAlexBubbleColor(event.target.value)} />
+              <input type="color" value={colors.Alex} onChange={(e) => setColors({ ...colors, Alex: e.target.value })} />
             </label>
           </div>
 
-          {backgroundMessage ? <p className="background-status">{backgroundMessage}</p> : null}
+          {bgMsg && <p className="background-status">{bgMsg}</p>}
         </section>
 
-        <section className="message-panel" aria-label="Conversation history">
-          {messages.length === 0 ? (
-            <p className="empty-state">Type a message and press Enter to start the conversation.</p>
-          ) : (
-            messages.map((message) => (
-              <Message
-                key={message.id}
-                sender={message.sender}
-                text={message.text}
-                timestamp={message.timestamp}
-                isSelf={message.sender === activeUser}
-                imageUrl={message.imageUrl}
-                bubbleStyle={{
-                  background:
-                    message.bubbleColor ??
-                    (message.sender === "You" ? yourBubbleColor : alexBubbleColor),
-                }}
-              />
-            ))
-          )}
+        <section
+          className="message-panel"
+          aria-label="Conversation history"
+          style={messagePanelStyle}
+        >
+          {messages.length === 0 ? <p className="empty-state">Type a message to start.</p> : messages.map((msg) => (
+            <Message key={msg.id} sender={msg.sender} text={msg.text} timestamp={msg.timestamp} isSelf={msg.sender === activeUser} imageUrl={msg.imageUrl} bubbleStyle={{ background: msg.bubbleColor }} />
+          ))}
           <div ref={endOfMessagesRef} />
         </section>
 
         <footer className="composer">
           <div className="composer-main">
-            <input type="text" value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={handleKeyDown} placeholder="Type a message..." />
+            <input type="text" value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), sendMessage())} placeholder="Type a message..." />
             <SendPhoto onFileSelect={handleMediaSelect} />
           </div>
           <div className="composer-actions">
-            {pendingAttachment ? (
-              <button type="button" className="attachment-chip" onClick={() => setPendingAttachment(null)}>
-                <span>📎 {pendingAttachment.name}</span>
-                <small>Remove</small>
+            {attachment && (
+              <button type="button" className="attachment-chip" onClick={() => setAttachment(null)}>
+                <span>📎 {attachment.name}</span><small>Remove</small>
               </button>
-            ) : null}
+            )}
             <button type="button" onClick={sendMessage}>Transmit</button>
           </div>
         </footer>

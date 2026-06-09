@@ -1,7 +1,7 @@
 import { type ChangeEvent, type RefObject } from "react";
 import { backgroundPresets } from "../utils/constants";
 
-// Props passed from the main app so this panel can control the theme.
+// The parent app passes these values so this panel can change the chat backdrop and bubble colors.
 type BackgroundSettingsProps = {
   backgroundMode: "preset" | "image";
   selectedPreset: string;
@@ -16,7 +16,7 @@ type BackgroundSettingsProps = {
   backgroundMessage: string;
 };
 
-// This panel lets the user switch themes and choose a custom background image.
+// This panel lets the user switch the chat backdrop and pick a custom image for the scene.
 const BackgroundSettings = (props: BackgroundSettingsProps) => {
   return (
     <section className="background-controls" aria-label="Background options">

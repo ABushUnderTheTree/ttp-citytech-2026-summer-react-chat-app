@@ -3,7 +3,7 @@ import type { CSSProperties } from "react";
 // The two possible senders in the chat UI.
 type Sender = "You" | "Alex";
 
-// The props this message bubble needs to render itself.
+// These props tell each chat bubble how to display its sender, content, and optional image.
 type MessageProps = {
   sender: Sender;
   text: string;
@@ -13,7 +13,7 @@ type MessageProps = {
   imageUrl?: string;
 };
 
-// Render one message bubble with the sender, timestamp, and text.
+// Render one message bubble, including any image attachment and the sender information.
 const Message = ({ sender, text, timestamp, isSelf, bubbleStyle, imageUrl }: MessageProps) => {
   return (
     <article className={`message-row ${isSelf ? "self" : "other"}`}>
@@ -22,7 +22,11 @@ const Message = ({ sender, text, timestamp, isSelf, bubbleStyle, imageUrl }: Mes
           <strong>{sender}</strong>
           <span>{timestamp}</span>
         </div>
-        {imageUrl ? <img src={imageUrl} alt="Shared attachment" className="message-image" /> : null}
+        {imageUrl ? (
+          <div className="message-media">
+            <img src={imageUrl} alt={text || "Shared image attachment"} className="message-image" />
+          </div>
+        ) : null}
         {text ? <p>{text}</p> : null}
       </div>
     </article>
