@@ -1,7 +1,7 @@
 :root {
-  color: #e5eefb;
+  color: #eff6ff;
   background-color: #020617;
-  font-family: Inter, "Segoe UI", sans-serif;
+  font-family: Inter, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
   line-height: 1.5;
   font-weight: 400;
   font-synthesis: none;
@@ -14,6 +14,10 @@
   box-sizing: border-box;
 }
 
+html {
+  scroll-behavior: smooth;
+}
+
 html,
 body,
 #root {
@@ -22,11 +26,54 @@ body,
 
 body {
   margin: 0;
-  background: #020617;
+  min-height: 100vh;
+  overflow-x: hidden;
+  background:
+    radial-gradient(circle at top, rgba(139, 92, 246, 0.14), transparent 18%),
+    radial-gradient(circle at 18% 100%, rgba(56, 189, 248, 0.10), transparent 18%),
+    linear-gradient(135deg, #020617 0%, #06111f 32%, #0f172a 68%, #020617 100%);
+}
+
+body::before,
+body::after {
+  content: "";
+  position: fixed;
+  inset: auto;
+  width: 420px;
+  height: 420px;
+  border-radius: 50%;
+  filter: blur(120px);
+  opacity: 0.18;
+  pointer-events: none;
+  z-index: -1;
+  animation: ambientDrift 12s ease-in-out infinite;
+}
+
+body::before {
+  top: -130px;
+  left: -170px;
+  background: rgba(192, 132, 252, 0.30);
+}
+
+body::after {
+  right: -150px;
+  bottom: -140px;
+  background: rgba(56, 189, 248, 0.22);
+  animation-delay: -6s;
+}
+
+@keyframes ambientDrift {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(18px, -20px, 0) scale(1.04); }
 }
 
 button,
 input,
 select {
   font: inherit;
+}
+
+*::selection {
+  background: rgba(139, 92, 246, 0.35);
+  color: #fff;
 }
